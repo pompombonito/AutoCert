@@ -1,7 +1,5 @@
 fastapi
 uvicorn
 pillow
-pandas
 python-multipart
-openpyxl
-requests
+fonttools
