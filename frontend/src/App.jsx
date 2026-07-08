@@ -165,7 +165,7 @@ export default function App() {
   return (
     <div style={{ padding: "20px", fontFamily: "sans-serif", maxWidth: "1200px", margin: "0 auto" }}>
       <h1>AutoCert — Bulk Certificate Download v1.0.1</h1>
-      <p style={{ color: "#666" }}>Last Update: July 8, 2026</p>
+      <p style={{ color: "#666" }}>Note: Hosted on Render's free tier. If the app has been idle, the first request may take up to a minute to wake up the server!</p>
       <hr style={{ margin: "15px 0" }} />
       
       {apiError && (
