@@ -12,7 +12,7 @@ from fastapi.responses import StreamingResponse
 from PIL import Image, ImageDraw, ImageFont
 from fontTools.ttLib import TTFont
 
-app = FastAPI(title="CertFlow Enterprise Scale API Pipeline")
+app = FastAPI(title="AutoCert — Bulk Certificate Download")
 
 # Global CORS Policy Link matching your client hosting environments
 app.add_middleware(
