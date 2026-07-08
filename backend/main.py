@@ -10,6 +10,14 @@ from PIL import Image, ImageDraw, ImageFont
 
 app = FastAPI()
 
+@app.get("/")
+def read_root():
+    return {
+        "status": "online",
+        "project": "CertFlow Core API Pipeline",
+        "message": "System operational. Awaiting incoming frontend payloads."
+    }
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
