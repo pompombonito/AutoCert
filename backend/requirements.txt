@@ -3,3 +3,6 @@ uvicorn
 pillow
 python-multipart
 fonttools
+pandas
+openpyxl
+requests

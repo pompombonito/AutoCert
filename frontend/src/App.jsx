@@ -2,62 +2,61 @@ import React, { useState, useEffect, useRef } from "react";
 import Papa from "papaparse";
 
 export default function App() {
-  // --- Original State Assets ---
+  // --- Asset states ---
   const [template, setTemplate] = useState(null);
   const [fontFile, setFontFile] = useState(null); 
-  const [selectedFontName, setSelectedFontName] = useState(""); // Populated dynamically by backend registry
+  const [selectedFontName, setSelectedFontName] = useState(""); 
   const [previewUrl, setPreviewUrl] = useState("");
   
+  // --- Pipeline Source States ---
   const [sourceType, setSourceType] = useState("file");
   const [spreadsheetFile, setSpreadsheetFile] = useState(null);
   const [sheetUrl, setSheetUrl] = useState("");
   
+  // --- Header parsing tracking ---
   const [headers, setHeaders] = useState([]);
   const [selectedColumn, setSelectedColumn] = useState("");
   const [manualColumnName, setManualColumnName] = useState("");
   
+  // --- Workspace Canvas Coordinates ---
   const [boxX, setBoxX] = useState(50);
   const [boxY, setBoxY] = useState(150);
   const [boxW, setBoxW] = useState(400);
   const [fontSize, setFontSize] = useState(64); 
   const [isDownloading, setIsDownloading] = useState(false);
 
-  // New states for tracking cloud system font assets
+  // --- Dynamic Cloud System Font States ---
   const [availableFonts, setAvailableFonts] = useState([]);
   const [loadingFonts, setLoadingFonts] = useState(true);
   const [apiError, setApiError] = useState("");
 
   const imageRef = useRef(null);
 
-  // Live Render URL base point
+  // Core Render service tracking entry point
   const BACKEND_URL = "https://autocert-tcpy.onrender.com";
 
-  // --- New Feature: Hydrate Font Options from Render Core Registry ---
+  // Hydrate the live backend font directory list on application load
   useEffect(() => {
-    async function syncCloudRegistry() {
+    async function fetchCloudFonts() {
       try {
         setLoadingFonts(true);
         const response = await fetch(`${BACKEND_URL}/fonts`);
-        if (!response.ok) throw new Error("Could not index the remote font assets library.");
-        
+        if (!response.ok) throw new Error("Could not download system typography list.");
         const data = await response.json();
         setAvailableFonts(data.fonts || []);
-        
-        // Match selection defaults cleanly
         if (data.fonts && data.fonts.length > 0) {
           setSelectedFontName(data.fonts[0]);
         }
       } catch (err) {
-        console.error("Font registry pipeline failure:", err);
-        setApiError("Font loader dropped connection. Verify Render instance status.");
+        console.error("Font registry collection down:", err);
+        setApiError("Could not retrieve remote server fonts. Verify Render service status.");
       } finally {
         setLoadingFonts(false);
       }
     }
-    syncCloudRegistry();
+    fetchCloudFonts();
   }, []);
 
-  // --- Original Handlers ---
   const handleTemplateChange = (e) => {
     const file = e.target.files[0];
     if (file) {
@@ -83,12 +82,12 @@ export default function App() {
         },
       });
     } else {
+      // Clear array structures for Excel formats to let users fallback gracefully onto explicit inputs
       setHeaders([]);
       setSelectedColumn("");
     }
   };
 
-  // --- Form Generation Handler with Integrated Unmasking Fixes ---
   const handleGenerate = async () => {
     if (!template) {
       alert("Please upload a template image.");
@@ -102,22 +101,18 @@ export default function App() {
     }
 
     setIsDownloading(true);
-    setApiError(""); // Clear old warnings on subsequent execution runs
-    
+    setApiError(""); 
+
     const formData = new FormData();
     formData.append("template", template);
     formData.append("name_column", finalColumnName);
     formData.append("box_x", parseInt(boxX, 10));
     formData.append("box_y", parseInt(boxY, 10));
-    formData.append("box_width", parseInt(boxW, 10));      // Updated name parameter key to line up with main.py
-    formData.append("box_height", parseInt(fontSize, 10));  // Dynamic vertical boundary calculations mapped
+    formData.append("box_w", parseInt(boxW, 10));
     formData.append("font_size", parseInt(fontSize, 10));
-    formData.append("font_name", selectedFontName); 
+    formData.append("font_name", selectedFontName);
     formData.append("display_w", imageRef.current ? imageRef.current.clientWidth : 800);
     formData.append("display_h", imageRef.current ? imageRef.current.clientHeight : 600);
-
-    // Backward compatibility array fallback logic for our refined names processing parameter
-    formData.append("names", JSON.stringify(["Sample Name Payload Sync"])); 
 
     if (fontFile) {
       formData.append("font_file", fontFile); 
@@ -145,23 +140,22 @@ export default function App() {
         body: formData,
       });
 
-      // Structural fix preventing [object Object] output strings on catch errors
+      // Catch error arrays cleanly so that validation feedback parses as clear text instead of [object Object]
       if (!response.ok) {
         const errorData = await response.json();
-        const cleanPayloadMsg = JSON.stringify(errorData, null, 2);
-        throw new Error(cleanPayloadMsg);
+        throw new Error(JSON.stringify(errorData, null, 2));
       }
 
       const blob = await response.blob();
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = "CertFlow_Batch_Compilation.zip";
+      a.download = "CertFlow_Bulk_Compilation.zip";
       document.body.appendChild(a);
       a.click();
       a.remove();
     } catch (err) {
-      console.error("Backend Error Trace:", err.message);
+      console.error("Pipeline Exception Trace:", err.message);
       setApiError(err.message);
     } finally {
       setIsDownloading(false);
@@ -174,10 +168,9 @@ export default function App() {
       <p style={{ color: "#666" }}>Tailored for administrative scale workflows.</p>
       <hr style={{ margin: "15px 0" }} />
       
-      {/* Real-time structural system trace box view */}
       {apiError && (
         <div style={{ padding: "15px", backgroundColor: "#ffebee", color: "#c62828", borderRadius: "4px", marginBottom: "20px" }}>
-          <strong>Core API Validation Exception Caught:</strong>
+          <strong>Core Engine Compilation Error Summary:</strong>
           <pre style={{ margin: "5px 0 0 0", fontSize: "11px", whiteSpace: "pre-wrap", overflowX: "auto" }}>{apiError}</pre>
         </div>
       )}
@@ -189,10 +182,9 @@ export default function App() {
           <label style={{ fontWeight: "bold" }}>Upload Background Template:</label>
           <input type="file" accept="image/*" onChange={handleTemplateChange} />
           
-          {/* Enhanced Live Font Registry Selector Dropdown */}
-          <label style={{ fontWeight: "bold", display: "block", marginTop: "15px" }}>Choose Core Interface Font Style:</label>
+          <label style={{ fontWeight: "bold", display: "block", marginTop: "15px" }}>Choose Cloud Registry Font Style:</label>
           {loadingFonts ? (
-            <p style={{ margin: "5px 0", fontSize: "13px", color: "#666" }}>Caching active system metadata indexes...</p>
+            <p style={{ margin: "5px 0", fontSize: "12px", color: "#666" }}>Indexing remote server assets...</p>
           ) : (
             <select value={selectedFontName} onChange={(e) => setSelectedFontName(e.target.value)} style={{ width: "100%", padding: "6px" }}>
               {availableFonts.map((f) => <option key={f} value={f}>{f}</option>)}
@@ -223,13 +215,13 @@ export default function App() {
 
           {sourceType === "file" ? (
             <div>
-              <label style={{ fontWeight: "bold" }}>Choose Spreadsheet (.csv, .xlsx):</label>
+              <label style={{ fontWeight: "bold" }}>Choose Spreadsheet (.csv, .xlsx, .xls):</label>
               <input type="file" accept=".csv, .xlsx, .xls" onChange={handleFileChange} />
               
               {headers.length > 0 ? (
                 <div style={{ marginTop: "15px" }}>
                   <label style={{ fontWeight: "bold" }}>Select Target Column Name:</label>
-                  <select value={selectedColumn} onChange={(e) => setSelectedColumn(e.target.value)}>
+                  <select value={selectedColumn} onChange={(e) => setSelectedColumn(e.target.value)} style={{ width: "100%", padding: "5px" }}>
                     {headers.map((h) => <option key={h} value={h}>{h}</option>)}
                   </select>
                 </div>
@@ -237,7 +229,7 @@ export default function App() {
                 spreadsheetFile && (
                   <div style={{ marginTop: "15px" }}>
                     <label style={{ fontWeight: "bold" }}>Type Exact Column Header:</label>
-                    <input type="text" placeholder="e.g., Full Name" value={manualColumnName} onChange={(e) => setManualColumnName(e.target.value)} />
+                    <input type="text" placeholder="e.g., Full Name" value={manualColumnName} onChange={(e) => setManualColumnName(e.target.value)} style={{ width: "100%", padding: "5px" }} />
                   </div>
                 )
               )}
@@ -250,7 +242,7 @@ export default function App() {
               
               <div style={{ marginTop: "15px" }}>
                 <label style={{ fontWeight: "bold" }}>Type Exact Column Header:</label>
-                <input type="text" placeholder="e.g., Full Name" value={manualColumnName} onChange={(e) => setManualColumnName(e.target.value)} />
+                <input type="text" placeholder="e.g., Full Name" value={manualColumnName} onChange={(e) => setManualColumnName(e.target.value)} style={{ width: "100%", padding: "5px" }} />
               </div>
             </div>
           )}
@@ -273,7 +265,7 @@ export default function App() {
             disabled={isDownloading}
             style={{ marginTop: "25px", padding: "12px 24px", background: "#22c55e", color: "white", border: "none", borderRadius: "5px", cursor: "pointer", width: "100%", fontSize: "16px", fontWeight: "bold" }}
           >
-            {isDownloading ? "Compiling Server Assets..." : "Execute Bulk Compilation"}
+            {isDownloading ? "Processing Pipeline Payload..." : "Execute Bulk Compilation"}
           </button>
         </div>
 

@@ -1,17 +1,20 @@
 import os
 import io
-import json
+import re
+import csv
 import zipfile
-from typing import List, Dict
+import requests
+import pandas as pd
+from typing import List, Dict, Optional
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from PIL import Image, ImageDraw, ImageFont
 from fontTools.ttLib import TTFont
 
-app = FastAPI(title="CertFlow Core API Pipeline")
+app = FastAPI(title="CertFlow Enterprise Scale API Pipeline")
 
-# Enable CORS middleware for Vercel interaction
+# Global CORS Policy Link matching your Vercel client environment
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -22,160 +25,168 @@ app.add_middleware(
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 FONTS_DIR = os.path.join(BASE_DIR, "fonts")
-
-# Global in-memory cache to map clean font display names to actual filenames
 FONT_REGISTRY: Dict[str, str] = {}
 
 def get_font_display_name(file_path: str) -> str:
-    """
-    Reads the binary metadata table inside a TTF/OTF file 
-    to extract its true human-readable font name.
-    """
+    """Reads embedded binary metadata tables to extract true font name."""
     try:
         font = TTFont(file_path, fontNumber=0, lazy=True)
         name_table = font['name']
-        # Look for Font Family Name (ID 1) or Full Font Name (ID 4)
         for record in name_table.names:
             if record.nameID in (4, 1):
-                if record.isUnicode():
-                    return record.toUnicode()
-                else:
-                    return record.string.decode('utf-8', errors='ignore')
+                return record.toUnicode() if record.isUnicode() else record.string.decode('utf-8', errors='ignore')
     except Exception:
         pass
-    # Fallback to filename if metadata is unreadable
     return os.path.basename(file_path)
 
 def refresh_font_registry():
-    """
-    Scans the fonts directory and builds a clean mapping dictionary.
-    """
     global FONT_REGISTRY
     FONT_REGISTRY.clear()
-    
     if not os.path.exists(FONTS_DIR):
         os.makedirs(FONTS_DIR)
         return
-
     for filename in os.listdir(FONTS_DIR):
-        ext = filename.lower()
-        if ext.endswith(('.ttf', '.otf')):
+        if filename.lower().endswith(('.ttf', '.otf')):
             full_path = os.path.join(FONTS_DIR, filename)
             display_name = get_font_display_name(full_path)
-            # Map the clean name (e.g., "Arial Bold") to the actual file (e.g., "arialbd.ttf")
             FONT_REGISTRY[display_name] = filename
 
-# Initialize the registry mapping immediately on app startup
+# Boot up initialization
 refresh_font_registry()
-
-
-@app.get("/")
-def read_root():
-    return {
-        "status": "online",
-        "project": "CertFlow Core API Pipeline",
-        "registered_fonts_count": len(FONT_REGISTRY)
-    }
-
 
 @app.get("/fonts")
 def get_available_fonts():
-    """
-    Endpoint for your React frontend. Call this to get an array 
-    of all real font names available to display in your UI dropdown.
-    """
-    # Force a refresh to catch any new file systems additions
     refresh_font_registry()
     return {"fonts": sorted(list(FONT_REGISTRY.keys()))}
-
 
 @app.post("/generate")
 async def generate_certificates(
     template: UploadFile = File(...),
-    names: str = Form(...),
+    name_column: str = Form(...),
     box_x: int = Form(...),
     box_y: int = Form(...),
-    box_width: int = Form(...),
-    box_height: int = Form(...),
+    box_w: int = Form(...),
     font_size: int = Form(...),
-    font_name: str = Form(...)  # Expects the clean display name chosen from the UI dropdown
+    font_name: str = Form(...),
+    display_w: int = Form(...),
+    display_h: int = Form(...),
+    font_file: Optional[UploadFile] = File(None),
+    spreadsheet_file: Optional[UploadFile] = File(None),
+    spreadsheet_url: Optional[str] = Form(None)
 ):
     try:
-        # 1. Parse name rows safely
-        try:
-            name_list = json.loads(names)
-        except Exception:
-            name_list = [n.strip() for n in names.split(",") if n.strip()]
+        # --- 1. Extract Recipient Names Array From Multi-source Data Pipeline ---
+        recipient_names: List[str] = []
 
-        # 2. Resolve the requested font display name to its real system filename
-        # Case-insensitive matching fallback logic
-        actual_filename = FONT_REGISTRY.get(font_name)
-        if not actual_filename:
-            # Try to match case-insensitively if things get mismatched
-            for display, file in FONT_REGISTRY.items():
-                if display.lower() == font_name.lower():
-                    actual_filename = file
-                    break
+        if spreadsheet_file:
+            file_bytes = await spreadsheet_file.read()
+            filename = spreadsheet_file.filename.lower()
+            
+            if filename.endswith('.csv'):
+                stream = io.StringIO(file_bytes.decode('utf-8', errors='ignore'))
+                df = pd.read_csv(stream)
+            elif filename.endswith(('.xlsx', '.xls')):
+                df = pd.read_excel(io.BytesIO(file_bytes))
+            else:
+                raise HTTPException(status_code=400, detail="Invalid extension. Provide CSV or Excel formatting.")
+            
+            if name_column not in df.columns:
+                raise HTTPException(status_code=400, detail=f"Column target '{name_column}' missing. Found: {list(df.columns)}")
+            recipient_names = df[name_column].dropna().astype(str).map(str.strip).tolist()
 
-        if actual_filename:
-            font_path = os.path.join(FONTS_DIR, actual_filename)
-        else:
-            font_path = None
-
-        template_bytes = await template.read()
-        zip_buffer = io.BytesIO()
+        elif spreadsheet_url:
+            # Reconstruct Google Sheets browser links into structural clean CSV stream export vectors
+            sheet_match = re.search(r"/spreadsheets/d/([a-zA-Z0-9-_]+)", spreadsheet_url)
+            if not sheet_match:
+                raise HTTPException(status_code=400, detail="Malformed Google Sheets URL pattern parsed.")
+            
+            export_url = f"https://docs.google.com/spreadsheets/d/{sheet_match.group(1)}/export?format=csv"
+            response = requests.get(export_url, timeout=15)
+            if response.status_code != 200:
+                raise HTTPException(status_code=400, detail="Target spreadsheet restricted. Share file access as 'Anyone with link can view'.")
+            
+            stream = io.StringIO(response.text)
+            df = pd.read_csv(stream)
+            if name_column not in df.columns:
+                raise HTTPException(status_code=400, detail=f"Column target '{name_column}' missing in Google Sheet headers.")
+            recipient_names = df[name_column].dropna().astype(str).map(str.strip).tolist()
         
-        with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
-            for name in name_list:
-                image = Image.open(io.BytesIO(template_bytes)).convert("RGB")
-                draw = ImageDraw.Draw(image)
-                
-                current_font_size = font_size
-                font = ImageFont.load_default()
-                text_width, text_height = 0, 0
+        else:
+            raise HTTPException(status_code=400, detail="Data source missing. Provide a spreadsheet file or Google Sheets stream link.")
 
-                # 3. Dynamic layout text scaling loop
-                while current_font_size > 12:
-                    if font_path:
-                        try:
-                            font = ImageFont.truetype(font_path, size=current_font_size)
-                        except Exception:
-                            font = ImageFont.load_default()
-                            break
-                    else:
+        if not recipient_names:
+            raise HTTPException(status_code=400, detail="Target compilation names array resolved completely empty.")
+
+        # --- 2. Font File Override Processing Handling ---
+        # Cache file streams directly in memory so Pillow can read it natively without writing to local server disks
+        custom_font_bytes = await font_file.read() if font_file else None
+
+        # --- 3. Process Structural Coordinates Transformation Math ---
+        template_bytes = await template.read()
+        base_image = Image.open(io.BytesIO(template_bytes)).convert("RGB")
+        actual_w, actual_h = base_image.size
+
+        # Project visual coordinates out onto actual raw canvas resolution limits
+        scale_x = actual_w / display_w
+        scale_y = actual_h / display_h
+
+        real_x = int(box_x * scale_x)
+        real_y = int(box_y * scale_y)
+        real_w = int(box_w * scale_x)
+        real_base_font_size = int(font_size * scale_x)
+
+        # --- 4. Render Engine Loop Engine ---
+        zip_buffer = io.BytesIO()
+        with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
+            for name in recipient_names:
+                img = base_image.copy()
+                draw = ImageDraw.Draw(img)
+                
+                current_size = real_base_font_size
+                font = ImageFont.load_default()
+                text_w, text_h = 0, 0
+
+                # Auto-scaling loop calculations
+                while current_size > 10:
+                    try:
+                        if custom_font_bytes:
+                            font = ImageFont.truetype(io.BytesIO(custom_font_bytes), size=current_size)
+                        else:
+                            mapped_file = FONT_REGISTRY.get(font_name, font_name)
+                            font_path = os.path.join(FONTS_DIR, mapped_file)
+                            font = ImageFont.truetype(font_path, size=current_size) if os.path.exists(font_path) else ImageFont.load_default()
+                    except Exception:
                         font = ImageFont.load_default()
-                        break
 
                     try:
                         bbox = draw.textbbox((0, 0), name, font=font)
-                        text_width = bbox[2] - bbox[0]
-                        text_height = bbox[3] - bbox[1]
+                        text_w, text_h = bbox[2] - bbox[0], bbox[3] - bbox[1]
                     except AttributeError:
-                        text_width, text_height = draw.textsize(name, font=font)
+                        text_w, text_h = draw.textsize(name, font=font)
 
-                    if text_width <= box_width and text_height <= box_height:
+                    if text_w <= real_w:
                         break
-                    current_font_size -= 2
+                    current_size -= 2
 
-                # 4. Canvas centering alignment stamps
-                target_x = box_x + (box_width - text_width) // 2
-                target_y = box_y + (box_height - text_height) // 2
+                # Snap text alignment frames directly down inside layout bounds configurations
+                target_x = real_x + (real_w - text_w) // 2
+                target_y = real_y + (real_base_font_size - text_h) - 4  # Matches flex-end canvas baseline rules
+
                 draw.text((target_x, target_y), name, fill=(0, 0, 0), font=font)
                 
-                img_byte_arr = io.BytesIO()
-                image.save(img_byte_arr, format="JPEG", quality=95)
-                img_byte_arr.seek(0)
+                out_stream = io.BytesIO()
+                img.save(out_stream, format="JPEG", quality=95)
+                out_stream.seek(0)
                 
-                sanitized_name = "".join(c for c in name if c.isalnum() or c in (" ", "_", "-")).rstrip()
-                file_name = f"Certificate_{sanitized_name.replace(' ', '_')}.jpg"
-                zip_file.writestr(file_name, img_byte_arr.read())
-        
+                clean_filename = "".join(c for c in name if c.isalnum() or c in (" ", "_", "-")).rstrip()
+                zip_file.writestr(f"Certificate_{clean_filename.replace(' ', '_')}.jpg", out_stream.read())
+
         zip_buffer.seek(0)
         return StreamingResponse(
             zip_buffer,
             media_type="application/zip",
-            headers={"Content-Disposition": "attachment; filename=CertFlow_Batch.zip"}
+            headers={"Content-Disposition": "attachment; filename=CertFlow_Batch_Output.zip"}
         )
         
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Pipeline error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Execution pipeline failure: {str(e)}")
