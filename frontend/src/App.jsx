@@ -164,8 +164,8 @@ export default function App() {
 
   return (
     <div style={{ padding: "20px", fontFamily: "sans-serif", maxWidth: "1200px", margin: "0 auto" }}>
-      <h1>CertFlow — Bulk Certificate Utility</h1>
-      <p style={{ color: "#666" }}>Tailored for administrative scale workflows.</p>
+      <h1>AutoCert — Bulk Certificate Download v1.0.1</h1>
+      <p style={{ color: "#666" }}>Last Update: July 8, 2026</p>
       <hr style={{ margin: "15px 0" }} />
       
       {apiError && (
