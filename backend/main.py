@@ -14,7 +14,7 @@ from fontTools.ttLib import TTFont
 
 app = FastAPI(title="CertFlow Enterprise Scale API Pipeline")
 
-# Global CORS Policy Link matching your Vercel client environment
+# Global CORS Policy Link matching your client hosting environments
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -51,7 +51,7 @@ def refresh_font_registry():
             display_name = get_font_display_name(full_path)
             FONT_REGISTRY[display_name] = filename
 
-# Boot up initialization
+# Boot up initialization and directory scanning
 refresh_font_registry()
 
 @app.get("/fonts")
@@ -118,7 +118,6 @@ async def generate_certificates(
             raise HTTPException(status_code=400, detail="Target compilation names array resolved completely empty.")
 
         # --- 2. Font File Override Processing Handling ---
-        # Cache file streams directly in memory so Pillow can read it natively without writing to local server disks
         custom_font_bytes = await font_file.read() if font_file else None
 
         # --- 3. Process Structural Coordinates Transformation Math ---
@@ -126,7 +125,7 @@ async def generate_certificates(
         base_image = Image.open(io.BytesIO(template_bytes)).convert("RGB")
         actual_w, actual_h = base_image.size
 
-        # Project visual coordinates out onto actual raw canvas resolution limits
+        # Project visual browser workspace dimensions out onto raw image resolution boundaries
         scale_x = actual_w / display_w
         scale_y = actual_h / display_h
 
@@ -135,7 +134,7 @@ async def generate_certificates(
         real_w = int(box_w * scale_x)
         real_base_font_size = int(font_size * scale_x)
 
-        # --- 4. Render Engine Loop Engine ---
+        # --- 4. Render Engine Zip Loop Engine ---
         zip_buffer = io.BytesIO()
         with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
             for name in recipient_names:
@@ -146,7 +145,7 @@ async def generate_certificates(
                 font = ImageFont.load_default()
                 text_w, text_h = 0, 0
 
-                # Auto-scaling loop calculations
+                # Dynamic Auto-scaling Loop Engine
                 while current_size > 10:
                     try:
                         if custom_font_bytes:
@@ -158,6 +157,7 @@ async def generate_certificates(
                     except Exception:
                         font = ImageFont.load_default()
 
+                    # Measure visible bounds
                     try:
                         bbox = draw.textbbox((0, 0), name, font=font)
                         text_w, text_h = bbox[2] - bbox[0], bbox[3] - bbox[1]
@@ -168,16 +168,28 @@ async def generate_certificates(
                         break
                     current_size -= 2
 
-                # Snap text alignment frames directly down inside layout bounds configurations
+                # --- FIX: METRICS ALIGNMENT CORRECTION FOR OVERLAPPING TEXT ---
+                # Centers the text bounding footprint horizontally within layout limits
                 target_x = real_x + (real_w - text_w) // 2
-                target_y = real_y + (real_base_font_size - text_h) - 4  # Matches flex-end canvas baseline rules
+                
+                # Dynamic buffer prevents lower font parts (descenders) from breaking past the bottom border.
+                baseline_safety_margin = int(current_size * 0.12)
+                target_y = real_y + real_base_font_size - baseline_safety_margin
 
-                draw.text((target_x, target_y), name, fill=(0, 0, 0), font=font)
+                # Render with text anchor tracking tied to Left-baseline mode ("ls")
+                draw.text(
+                    (target_x, target_y), 
+                    name, 
+                    fill=(0, 0, 0), 
+                    font=font, 
+                    anchor="ls"
+                )
                 
                 out_stream = io.BytesIO()
                 img.save(out_stream, format="JPEG", quality=95)
                 out_stream.seek(0)
                 
+                # Sanitize name string inputs to keep generated directory structures healthy
                 clean_filename = "".join(c for c in name if c.isalnum() or c in (" ", "_", "-")).rstrip()
                 zip_file.writestr(f"Certificate_{clean_filename.replace(' ', '_')}.jpg", out_stream.read())
 
