@@ -1,6 +1,6 @@
-# CertFlow — Bulk Certificate Generation Utility
+# AutoCert — Bulk Certificate Download v1.0.1
 
-CertFlow is a high-throughput, web-based administrative tool designed to automate the generation of customized certificates at scale. By combining a dynamic React frontend workspace with an asynchronous FastAPI processing pipeline, CertFlow allows users to visually map text boundaries onto graphic templates and compile hundreds of personalized certificates into a single deployment-ready ZIP package in seconds.
+AutoCert is a high-throughput, web-based administrative tool designed to automate the generation of customized certificates at scale. By combining a dynamic React frontend workspace with an asynchronous FastAPI processing pipeline, CertFlow allows users to visually map text boundaries onto graphic templates and compile hundreds of personalized certificates into a single deployment-ready ZIP package in seconds.
 
 ---
 
