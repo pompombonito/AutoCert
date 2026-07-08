@@ -1,198 +1,317 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
+import Papa from "papaparse";
 
 export default function App() {
-  // --- State Management ---
+  // --- Original State Assets ---
   const [template, setTemplate] = useState(null);
-  const [namesInput, setNamesInput] = useState("");
-  const [boxX, setBoxX] = useState(100);
-  const [boxY, setBoxY] = useState(200);
-  const [boxWidth, setBoxWidth] = useState(400);
-  const [boxHeight, setBoxHeight] = useState(100);
-  const [fontSize, setFontSize] = useState(40);
+  const [fontFile, setFontFile] = useState(null); 
+  const [selectedFontName, setSelectedFontName] = useState(""); // Populated dynamically by backend registry
+  const [previewUrl, setPreviewUrl] = useState("");
   
-  // Font States
-  const [availableFonts, setAvailableFonts] = useState([]);
-  const [selectedFont, setSelectedFont] = useState("");
-  const [loadingFonts, setLoadingFonts] = useState(true);
+  const [sourceType, setSourceType] = useState("file");
+  const [spreadsheetFile, setSpreadsheetFile] = useState(null);
+  const [sheetUrl, setSheetUrl] = useState("");
   
-  // Application Status States
-  const [isGenerating, setIsGenerating] = useState(false);
-  const [errorMessage, setErrorMessage] = useState("");
+  const [headers, setHeaders] = useState([]);
+  const [selectedColumn, setSelectedColumn] = useState("");
+  const [manualColumnName, setManualColumnName] = useState("");
+  
+  const [boxX, setBoxX] = useState(50);
+  const [boxY, setBoxY] = useState(150);
+  const [boxW, setBoxW] = useState(400);
+  const [fontSize, setFontSize] = useState(64); 
+  const [isDownloading, setIsDownloading] = useState(false);
 
-  // Change this to match your live Render backend URL endpoint
+  // New states for tracking cloud system font assets
+  const [availableFonts, setAvailableFonts] = useState([]);
+  const [loadingFonts, setLoadingFonts] = useState(true);
+  const [apiError, setApiError] = useState("");
+
+  const imageRef = useRef(null);
+
+  // Live Render URL base point
   const BACKEND_URL = "https://autocert-tcpy.onrender.com";
 
-  // --- Fetch Available Fonts from Backend on Mount ---
+  // --- New Feature: Hydrate Font Options from Render Core Registry ---
   useEffect(() => {
-    async function fetchFonts() {
+    async function syncCloudRegistry() {
       try {
         setLoadingFonts(true);
         const response = await fetch(`${BACKEND_URL}/fonts`);
-        if (!response.ok) throw new Error("Failed to retrieve font collection registry.");
+        if (!response.ok) throw new Error("Could not index the remote font assets library.");
         
         const data = await response.json();
         setAvailableFonts(data.fonts || []);
         
-        // Auto-select the first font in the list as default if available
+        // Match selection defaults cleanly
         if (data.fonts && data.fonts.length > 0) {
-          setSelectedFont(data.fonts[0]);
+          setSelectedFontName(data.fonts[0]);
         }
       } catch (err) {
-        console.error("Font registry fetch error:", err);
-        setErrorMessage("Could not load backend fonts. Please check if backend is awake.");
+        console.error("Font registry pipeline failure:", err);
+        setApiError("Font loader dropped connection. Verify Render instance status.");
       } finally {
         setLoadingFonts(false);
       }
     }
-    fetchFonts();
+    syncCloudRegistry();
   }, []);
 
-  // --- Form Submission Handler ---
-  const handleGenerate = async (e) => {
-    e.preventDefault();
-    setIsGenerating(true);
-    setErrorMessage("");
+  // --- Original Handlers ---
+  const handleTemplateChange = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      setTemplate(file);
+      setPreviewUrl(URL.createObjectURL(file));
+    }
+  };
 
+  const handleFileChange = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    setSpreadsheetFile(file);
+    if (file.name.toLowerCase().endsWith(".csv")) {
+      Papa.parse(file, {
+        header: true,
+        preview: 1,
+        complete: (results) => {
+          if (results.data.length > 0) {
+            const parsedHeaders = Object.keys(results.data[0]);
+            setHeaders(parsedHeaders);
+            setSelectedColumn(parsedHeaders[0]);
+          }
+        },
+      });
+    } else {
+      setHeaders([]);
+      setSelectedColumn("");
+    }
+  };
+
+  // --- Form Generation Handler with Integrated Unmasking Fixes ---
+  const handleGenerate = async () => {
     if (!template) {
-      setErrorMessage("Please upload a base certificate image template.");
-      setIsGenerating(false);
+      alert("Please upload a template image.");
       return;
     }
 
-    if (!selectedFont) {
-      setErrorMessage("Please select a font style from the dropdown selection.");
-      setIsGenerating(false);
+    const finalColumnName = sourceType === "file" && headers.length > 0 ? selectedColumn : manualColumnName;
+    if (!finalColumnName) {
+      alert("Please specify the Name Column header.");
       return;
+    }
+
+    setIsDownloading(true);
+    setApiError(""); // Clear old warnings on subsequent execution runs
+    
+    const formData = new FormData();
+    formData.append("template", template);
+    formData.append("name_column", finalColumnName);
+    formData.append("box_x", parseInt(boxX, 10));
+    formData.append("box_y", parseInt(boxY, 10));
+    formData.append("box_width", parseInt(boxW, 10));      // Updated name parameter key to line up with main.py
+    formData.append("box_height", parseInt(fontSize, 10));  // Dynamic vertical boundary calculations mapped
+    formData.append("font_size", parseInt(fontSize, 10));
+    formData.append("font_name", selectedFontName); 
+    formData.append("display_w", imageRef.current ? imageRef.current.clientWidth : 800);
+    formData.append("display_h", imageRef.current ? imageRef.current.clientHeight : 600);
+
+    // Backward compatibility array fallback logic for our refined names processing parameter
+    formData.append("names", JSON.stringify(["Sample Name Payload Sync"])); 
+
+    if (fontFile) {
+      formData.append("font_file", fontFile); 
+    }
+
+    if (sourceType === "file") {
+      if (!spreadsheetFile) {
+        alert("Please upload a spreadsheet file.");
+        setIsDownloading(false);
+        return;
+      }
+      formData.append("spreadsheet_file", spreadsheetFile);
+    } else {
+      if (!sheetUrl) {
+        alert("Please paste a valid Google Sheets URL.");
+        setIsDownloading(false);
+        return;
+      }
+      formData.append("spreadsheet_url", sheetUrl);
     }
 
     try {
-      // 1. Pack structural data into standard browser FormData
-      const formData = new FormData();
-      formData.append("template", template);
-      formData.append("names", namesInput); // Sends as comma-separated layout string
-      formData.append("box_x", parseInt(boxX, 10));
-      formData.append("box_y", parseInt(boxY, 10));
-      formData.append("box_width", parseInt(boxWidth, 10));
-      formData.append("box_height", parseInt(boxHeight, 10));
-      formData.append("font_size", parseInt(fontSize, 10));
-      formData.append("font_name", selectedFont); // Matches the expected FastAPI parameter key
-
-      // 2. Ship payload stream to Render API endpoint
       const response = await fetch(`${BACKEND_URL}/generate`, {
         method: "POST",
         body: formData,
       });
 
-      // 3. Robust Error Unmasking Check
+      // Structural fix preventing [object Object] output strings on catch errors
       if (!response.ok) {
         const errorData = await response.json();
-        // Stringify the raw object data structure so it displays explicitly on screen
-        const readableError = JSON.stringify(errorData, null, 2);
-        throw new Error(readableError);
+        const cleanPayloadMsg = JSON.stringify(errorData, null, 2);
+        throw new Error(cleanPayloadMsg);
       }
 
-      // 4. Download processed output blob stream archive
       const blob = await response.blob();
-      const downloadUrl = window.URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = downloadUrl;
-      link.setAttribute("download", "CertFlow_Batch_Compilation.zip");
-      document.body.appendChild(link);
-      link.click();
-      link.parentNode.removeChild(link);
-      
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "CertFlow_Batch_Compilation.zip";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
     } catch (err) {
-      console.error("Core Pipeline Exception Caught:", err.message);
-      setErrorMessage(err.message);
+      console.error("Backend Error Trace:", err.message);
+      setApiError(err.message);
     } finally {
-      setIsGenerating(false);
+      setIsDownloading(false);
     }
   };
 
   return (
-    <div style={{ maxWidth: "600px", margin: "40px auto", padding: "20px", fontFamily: "sans-serif" }}>
-      <h2>CertFlow Core API Control Interface</h2>
+    <div style={{ padding: "20px", fontFamily: "sans-serif", maxWidth: "1200px", margin: "0 auto" }}>
+      <h1>CertFlow — Bulk Certificate Utility</h1>
+      <p style={{ color: "#666" }}>Tailored for administrative scale workflows.</p>
+      <hr style={{ margin: "15px 0" }} />
       
-      {errorMessage && (
-        <div style={{ padding: "15px", backgroundColor: "#ffebee", color: "#c62828", borderRadius: "4px", marginBottom: "20px", whiteSpace: "pre-wrap" }}>
-          <strong>Execution Block:</strong>
-          <pre style={{ margin: "5px 0 0 0", fontSize: "12px", overflowX: "auto" }}>{errorMessage}</pre>
+      {/* Real-time structural system trace box view */}
+      {apiError && (
+        <div style={{ padding: "15px", backgroundColor: "#ffebee", color: "#c62828", borderRadius: "4px", marginBottom: "20px" }}>
+          <strong>Core API Validation Exception Caught:</strong>
+          <pre style={{ margin: "5px 0 0 0", fontSize: "11px", whiteSpace: "pre-wrap", overflowX: "auto" }}>{apiError}</pre>
         </div>
       )}
-
-      <form onSubmit={handleGenerate} style={{ display: "flex", flexDirection: "column", gap: "15px" }}>
-        
-        <div>
-          <label style={{ display: "block", marginBottom: "5px", fontWeight: "bold" }}>1. Base Template Image:</label>
-          <input type="file" accept="image/*" onChange={(e) => setTemplate(e.target.files[0])} />
-        </div>
-
-        <div>
-          <label style={{ display: "block", marginBottom: "5px", fontWeight: "bold" }}>2. Recipient Names (Comma separated):</label>
-          <textarea 
-            rows="3" 
-            style={{ width: "100%", padding: "8px" }} 
-            placeholder="John Doe, Jane Smith, Alan Turing"
-            value={namesInput}
-            onChange={(e) => setNamesInput(e.target.value)}
-            required
-          />
-        </div>
-
-        <div>
-          <label style={{ display: "block", marginBottom: "5px", fontWeight: "bold" }}>3. Select Custom Typography Font:</label>
+      
+      <div style={{ display: "flex", gap: "40px", marginTop: "20px" }}>
+        {/* Left Side Controls Panel */}
+        <div style={{ flex: "1", minWidth: "320px" }}>
+          <h3>1. Asset & Typography Setup</h3>
+          <label style={{ fontWeight: "bold" }}>Upload Background Template:</label>
+          <input type="file" accept="image/*" onChange={handleTemplateChange} />
+          
+          {/* Enhanced Live Font Registry Selector Dropdown */}
+          <label style={{ fontWeight: "bold", display: "block", marginTop: "15px" }}>Choose Core Interface Font Style:</label>
           {loadingFonts ? (
-            <p style={{ margin: 0, fontSize: "14px", color: "#666" }}>Scanning cloud font registry directory...</p>
+            <p style={{ margin: "5px 0", fontSize: "13px", color: "#666" }}>Caching active system metadata indexes...</p>
           ) : (
-            <select 
-              style={{ width: "100%", padding: "8px" }}
-              value={selectedFont}
-              onChange={(e) => setSelectedFont(e.target.value)}
-              required
-            >
-              {availableFonts.length === 0 ? (
-                <option value="">No custom fonts found on server registry</option>
-              ) : (
-                availableFonts.map((fontName) => (
-                  <option key={fontName} value={fontName}>{fontName}</option>
-                ))
-              )}
+            <select value={selectedFontName} onChange={(e) => setSelectedFontName(e.target.value)} style={{ width: "100%", padding: "6px" }}>
+              {availableFonts.map((f) => <option key={f} value={f}>{f}</option>)}
             </select>
           )}
+
+          <label style={{ fontWeight: "bold", display: "block", marginTop: "15px", color: "#4b5563" }}>
+            Optional: Upload Custom Font File (.ttf, .otf)
+          </label>
+          <input type="file" accept=".ttf, .otf" onChange={(e) => setFontFile(e.target.files[0])} />
+          {fontFile && <p style={{ fontSize: "12px", color: "#16a34a" }}>✓ Custom font file loaded (overrides selection menu)</p>}
+          
+          <h3 style={{ marginTop: "25px" }}>2. Recipient Data Pipeline</h3>
+          <div style={{ display: "flex", gap: "10px", marginBottom: "15px" }}>
+            <button 
+              onClick={() => setSourceType("file")}
+              style={{ flex: 1, padding: "8px", cursor: "pointer", background: sourceType === "file" ? "#0070f3" : "#eee", color: sourceType === "file" ? "white" : "#333", border: "1px solid #ccc", borderRadius: "4px" }}
+            >
+              Local File Upload
+            </button>
+            <button 
+              onClick={() => setSourceType("url")}
+              style={{ flex: 1, padding: "8px", cursor: "pointer", background: sourceType === "url" ? "#0070f3" : "#eee", color: sourceType === "url" ? "white" : "#333", border: "1px solid #ccc", borderRadius: "4px" }}
+            >
+              Google Sheets Link
+            </button>
+          </div>
+
+          {sourceType === "file" ? (
+            <div>
+              <label style={{ fontWeight: "bold" }}>Choose Spreadsheet (.csv, .xlsx):</label>
+              <input type="file" accept=".csv, .xlsx, .xls" onChange={handleFileChange} />
+              
+              {headers.length > 0 ? (
+                <div style={{ marginTop: "15px" }}>
+                  <label style={{ fontWeight: "bold" }}>Select Target Column Name:</label>
+                  <select value={selectedColumn} onChange={(e) => setSelectedColumn(e.target.value)}>
+                    {headers.map((h) => <option key={h} value={h}>{h}</option>)}
+                  </select>
+                </div>
+              ) : (
+                spreadsheetFile && (
+                  <div style={{ marginTop: "15px" }}>
+                    <label style={{ fontWeight: "bold" }}>Type Exact Column Header:</label>
+                    <input type="text" placeholder="e.g., Full Name" value={manualColumnName} onChange={(e) => setManualColumnName(e.target.value)} />
+                  </div>
+                )
+              )}
+            </div>
+          ) : (
+            <div>
+              <label style={{ fontWeight: "bold" }}>Paste Public Google Sheet URL:</label>
+              <input type="text" placeholder="https://docs.google.com/spreadsheets/d/.../edit" value={sheetUrl} onChange={(e) => setSheetUrl(e.target.value)} style={{ width: "100%", padding: "5px" }} />
+              <p style={{ fontSize: "11px", color: "#666", marginTop: "3px" }}>⚠️ Sheet must be shared as "Anyone with the link can view"</p>
+              
+              <div style={{ marginTop: "15px" }}>
+                <label style={{ fontWeight: "bold" }}>Type Exact Column Header:</label>
+                <input type="text" placeholder="e.g., Full Name" value={manualColumnName} onChange={(e) => setManualColumnName(e.target.value)} />
+              </div>
+            </div>
+          )}
+
+          <h3 style={{ marginTop: "25px" }}>3. Graphic Boundary Alignment</h3>
+          <label>Horizontal Position (X): {boxX}px</label>
+          <input type="range" min="0" max="1200" value={boxX} onChange={(e) => setBoxX(Number(e.target.value))} style={{ width: "100%" }} />
+          
+          <label>Vertical Position (Y): {boxY}px</label>
+          <input type="range" min="0" max="1200" value={boxY} onChange={(e) => setBoxY(Number(e.target.value))} style={{ width: "100%" }} />
+          
+          <label>Text Bounding Limit Width: {boxW}px</label>
+          <input type="range" min="50" max="1200" value={boxW} onChange={(e) => setBoxW(Number(e.target.value))} style={{ width: "100%" }} />
+
+          <label>Target Font Base Size (Box Height): {fontSize}px</label>
+          <input type="range" min="14" max="200" value={fontSize} onChange={(e) => setFontSize(Number(e.target.value))} style={{ width: "100%" }} />
+
+          <button 
+            onClick={handleGenerate} 
+            disabled={isDownloading}
+            style={{ marginTop: "25px", padding: "12px 24px", background: "#22c55e", color: "white", border: "none", borderRadius: "5px", cursor: "pointer", width: "100%", fontSize: "16px", fontWeight: "bold" }}
+          >
+            {isDownloading ? "Compiling Server Assets..." : "Execute Bulk Compilation"}
+          </button>
         </div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
-          <div>
-            <label style={{ display: "block", fontSize: "14px" }}>Box X Offset (px):</label>
-            <input type="number" style={{ width: "100%", padding: "6px" }} value={boxX} onChange={(e) => setBoxX(e.target.value)} />
-          </div>
-          <div>
-            <label style={{ display: "block", fontSize: "14px" }}>Box Y Offset (px):</label>
-            <input type="number" style={{ width: "100%", padding: "6px" }} value={boxY} onChange={(e) => setBoxY(e.target.value)} />
-          </div>
-          <div>
-            <label style={{ display: "block", fontSize: "14px" }}>Bounding Width (px):</label>
-            <input type="number" style={{ width: "100%", padding: "6px" }} value={boxWidth} onChange={(e) => setBoxWidth(e.target.value)} />
-          </div>
-          <div>
-            <label style={{ display: "block", fontSize: "14px" }}>Bounding Height (px):</label>
-            <input type="number" style={{ width: "100%", padding: "6px" }} value={boxHeight} onChange={(e) => setBoxHeight(e.target.value)} />
-          </div>
+        {/* Right Preview Panel Workspace */}
+        <div style={{ flex: "2" }}>
+          <h3 style={{ marginBottom: "10px" }}>Live Layout Alignment Engine</h3>
+          {previewUrl ? (
+            <div style={{ position: "relative", display: "inline-block", border: "2px solid #ccc", borderRadius: "4px" }}>
+              <img ref={imageRef} src={previewUrl} alt="Live Workspace" style={{ maxWidth: "100%", height: "auto", display: "block" }} />
+              
+              <div style={{
+                position: "absolute",
+                left: `${boxX}px`,
+                top: `${boxY}px`,
+                width: `${boxW}px`,
+                height: `${fontSize}px`,
+                border: "2px dashed #ef4444",
+                backgroundColor: "rgba(239, 68, 68, 0.15)",
+                color: "#ef4444",
+                display: "flex",
+                alignItems: "flex-end", 
+                justifyContent: "center",
+                fontSize: "11px",
+                fontWeight: "bold",
+                pointerEvents: "none",
+                paddingBottom: "2px",
+                boxSizing: "border-box"
+              }}>
+                [ Text Align Bottom ]
+              </div>
+            </div>
+          ) : (
+            <div style={{ width: "100%", height: "450px", border: "2px dashed #cbd5e1", borderRadius: "6px", display: "flex", alignItems: "center", justifyContent: "center", color: "#64748b", background: "#f1f5f9" }}>
+              Awaiting Template upload asset to construct interactive canvas coordinate canvas.
+            </div>
+          )}
         </div>
-
-        <div>
-          <label style={{ display: "block", marginBottom: "5px" }}>Target Font Size (Max pt):</label>
-          <input type="number" style={{ width: "100%", padding: "6px" }} value={fontSize} onChange={(e) => setFontSize(e.target.value)} />
-        </div>
-
-        <button 
-          type="submit" 
-          disabled={isGenerating}
-          style={{ padding: "12px", backgroundColor: isGenerating ? "#ccc" : "#0070f3", color: "#fff", border: "none", borderRadius: "5px", cursor: isGenerating ? "not-allowed" : "pointer", fontWeight: "bold" }}
-        >
-          {isGenerating ? "Processing Batch Pipeline..." : "Generate Certificates"}
-        </button>
-      </form>
+      </div>
     </div>
   );
 }
